@@ -9,13 +9,16 @@ This module contains a class for working with http sessions.
 """
 
 try:
-    import httplib as client
+#    import httplib as client
     from urlparse import urlparse
     from urllib import urlencode
 except ImportError:
-    from http import client
+#    from http import client
     from urllib.parse import urlparse
     from urllib.parse import urlencode
+
+from requests import Request, Session, request
+from io import StringIO
 
 try:
     unicode
@@ -36,10 +39,13 @@ class HTTPSession(object):
     """Handles HTTP activity while keeping headers persisting across requests.
 
        :param headers: A dict with initial headers.
+       :param timeout: Timeout for http requested (default (10,60)
+                       10 seconds for connection, 60 seconds for read)
     """
-    def __init__(self, headers=None):
+    def __init__(self, headers=None, timeout=10):
         self.headers = headers or {}
         self.connections = {}
+        self.timeout = timeout
 
     def request(self, method, url, data=None, headers=None):
         if data and not isinstance(data, basestring):
@@ -54,26 +60,18 @@ class HTTPSession(object):
         # If connection for this scheme+location is not established, establish it.
         uri = urlparse(url)
         if not self.connections.get(uri.scheme+uri.netloc):
-            if uri.scheme == 'https':
-                self.connections[uri.scheme+uri.netloc] = client.HTTPSConnection(uri.netloc)
-            else:
-                self.connections[uri.scheme+uri.netloc] = client.HTTPConnection(uri.netloc)
+            session = Session()
+            session.headers = self.headers.copy()
+            self.connections[uri.scheme+uri.netloc] = session
 
-        request_headers = self.headers.copy()
+        session = self.connections[uri.scheme+uri.netloc]
+        response = session.request(method, url, data=data,
+                                   headers=headers,
+                                   timeout=self.timeout)
 
-        if headers:
-            for k, v in headers.items():
-                if v is None:
-                    del request_headers[k]
-                else:
-                    request_headers[k] = v
-
-        self.connections[uri.scheme+uri.netloc].request(method, url, data, headers=request_headers)
-        response = self.connections[uri.scheme+uri.netloc].getresponse()
-
-        if response.status > 399:
+        if response.status_code > 399:
             raise HTTPError(response)
-        return response
+        return response.text
 
     def get(self, url, **kwargs):
         return self.request('GET', url, **kwargs)
